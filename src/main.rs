@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use error_stack::{IntoReport, Report, ResultExt};
-use server_proxy::{create_app, create_default_state, App};
+use proxy::{create_app, create_default_state, App};
 
 use clap::Parser;
 
@@ -11,7 +11,7 @@ use clap::Parser;
 struct Args {
     // TODO: how do I make this not need the crate name?
     /// tracing/log crate logging directives
-    #[arg(long, env, default_value = "server_proxy=info")]
+    #[arg(long, env, default_value = "proxy=info")]
     log: String,
 
     /// Port to run the app on
