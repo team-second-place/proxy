@@ -88,8 +88,10 @@ async fn handle_ws_inner(
                                                         "shall be passed along to microcontroller"
                                                     );
 
-                                                    let message =
-                                                        ToMicrocontroller::Command(command);
+                                                    let message = ToMicrocontroller::Command(
+                                                        command,
+                                                        user_id.clone(),
+                                                    );
                                                     let message =
                                                         encode_to_microcontroller(&message)
                                                             .unwrap_or_log();
@@ -126,8 +128,41 @@ async fn handle_ws_inner(
                                         }
                                     }
                                 }
-                                other => {
-                                    tracing::error!(?other, "isn't handled yet");
+                                FromUser::Authenticate(authenticate) => {
+                                    match state
+                                        .microcontrollers
+                                        .get_mut(&authenticate.microcontroller_id)
+                                    {
+                                        Some(mut matching_microcontroller) => {
+                                            // In the real world, this sensitive info should not be logged!
+                                            tracing::info!(?authenticate, "shall be passed along");
+
+                                            let message = ToMicrocontroller::LoginRequest(
+                                                authenticate.login_info,
+                                                user_id.clone(),
+                                            );
+                                            let message =
+                                                encode_to_microcontroller(&message).unwrap_or_log();
+                                            let message =
+                                                axum::extract::ws::Message::Binary(message);
+                                            matching_microcontroller
+                                                .send(message)
+                                                .await
+                                                .unwrap_or_log();
+                                        }
+
+                                        None => {
+                                            // In the real world, this sensitive info should not be logged!
+                                            tracing::info!(?authenticate, "couldn't be passed along because the microcontroller is offline");
+
+                                            let response = ToUser::MicrocontrollerIsOffline;
+                                            let response =
+                                                encode_to_user(&response).unwrap_or_log();
+                                            let response =
+                                                axum::extract::ws::Message::Binary(response);
+                                            writer.send(response).await.unwrap_or_log();
+                                        }
+                                    }
                                 }
                             }
                         }

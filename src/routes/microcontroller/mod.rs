@@ -6,7 +6,7 @@ use axum::{
 };
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use messages::{
-    decode_from_microcontroller, encode_to_microcontroller, encode_to_user, Data,
+    decode_from_microcontroller, encode_to_microcontroller, encode_to_user, Authenticated, Data,
     FromMicrocontroller, MicrocontrollerId, Register, ToMicrocontroller, ToUser, UserId,
 };
 use tokio::{join, task::JoinError};
@@ -188,6 +188,70 @@ async fn on_microcontroller_broadcast_data(
     }
 }
 
+#[tracing::instrument(skip(state))]
+async fn on_microcontroller_login_response(
+    authenticated: bool,
+    user_id: UserId,
+    writer: &mut WebsocketSender,
+    registered_id: &Option<MicrocontrollerId>,
+    state: &AppState,
+) {
+    if authenticated {
+        if let Some(microcontroller_id) = registered_id {
+            let mut authentications = state.authentications.write().await;
+            authentications.put(microcontroller_id.clone(), user_id.clone());
+            drop(authentications);
+
+            if let Some(mut user_writer) = state.users.get_mut(&user_id) {
+                let response = ToUser::Authenticated(Authenticated(true));
+                let response = encode_to_user(&response).unwrap_or_log();
+                let response = axum::extract::ws::Message::Binary(response);
+
+                user_writer.send(response).await.unwrap_or_log();
+            } else {
+                tracing::info!(
+                    ?user_id,
+                    "authenticating this user was rejected due to them not being connected"
+                );
+
+                // Not really a usage error cause the user may have disconnected recently?
+                let response = ToMicrocontroller::UsageError;
+                let response = encode_to_microcontroller(&response).unwrap_or_log();
+                let response = axum::extract::ws::Message::Binary(response);
+                writer.send(response).await.unwrap_or_log();
+            }
+        } else {
+            tracing::info!(
+                ?user_id,
+                "authenticating with this microcontroller was rejected due to it not being registered"
+            );
+
+            let response = ToMicrocontroller::UsageError; // TODO: maybe unauthenticated rejection (more specific than usage error)
+            let response = encode_to_microcontroller(&response).unwrap_or_log();
+            let response = axum::extract::ws::Message::Binary(response);
+            writer.send(response).await.unwrap_or_log();
+        }
+    } else {
+        if let Some(mut user_writer) = state.users.get_mut(&user_id) {
+            let response = ToUser::Authenticated(Authenticated(false));
+            let response = encode_to_user(&response).unwrap_or_log();
+            let response = axum::extract::ws::Message::Binary(response);
+
+            user_writer.send(response).await.unwrap_or_log();
+        } else {
+            tracing::info!(
+                ?user_id,
+                "refusing to authenticate this user had no effect because they aren't connected"
+            );
+
+            let response = ToMicrocontroller::UsageError;
+            let response = encode_to_microcontroller(&response).unwrap_or_log();
+            let response = axum::extract::ws::Message::Binary(response);
+            writer.send(response).await.unwrap_or_log();
+        }
+    }
+}
+
 #[tracing::instrument(skip(writer))]
 async fn on_message_decode_error(error: messages::DecodeError, writer: &mut WebsocketSender) {
     tracing::warn!(?error);
@@ -294,6 +358,16 @@ async fn handle_ws_inner(
                                     &mut writer,
                                     &mut registered_id,
                                     &span,
+                                )
+                                .await;
+                            }
+                            FromMicrocontroller::LoginResponse(authenticated, user_id) => {
+                                on_microcontroller_login_response(
+                                    authenticated,
+                                    user_id,
+                                    &mut writer,
+                                    &registered_id,
+                                    &state,
                                 )
                                 .await;
                             }
