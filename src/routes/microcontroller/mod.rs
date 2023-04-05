@@ -362,6 +362,7 @@ async fn handle_ws_inner(
                                     register,
                                     &mut writer,
                                     &mut registered_id,
+                                    &state,
                                     &span,
                                 )
                                 .await;
