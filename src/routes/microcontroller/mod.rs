@@ -71,12 +71,17 @@ async fn on_microcontroller_register(
     register: Register,
     writer: &mut WebsocketSender,
     registered_id: &mut Option<MicrocontrollerId>,
+    state: &AppState,
     span: &tracing::Span,
 ) {
     let microcontroller_id = register.microcontroller_id;
     span.record("microcontroller_id", microcontroller_id.clone());
 
-    registered_id.replace(microcontroller_id);
+    registered_id.replace(microcontroller_id.clone());
+
+    state
+        .microcontrollers
+        .insert(microcontroller_id.clone(), writer.clone());
 
     // Because users cannot connect to the microcontroller without it already being registered,
     // UsersAreOffline is the denoted response to a registration
