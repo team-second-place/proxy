@@ -65,8 +65,6 @@ async fn handle_ws_inner(
 
     state.users.insert(user_id.clone(), writer.clone());
 
-    let authenticated_for_microcontroller: Option<&MicrocontrollerId> = None;
-
     while let Some(message) = reader.next().await {
         match message {
             Ok(message) => match message {
@@ -77,6 +75,9 @@ async fn handle_ws_inner(
                         Ok(message) => {
                             match message {
                                 FromUser::Command(command) => {
+                                    let authentications = state.authentications.read().await;
+                                    let authenticated_for_microcontroller =
+                                        authentications.get_from_value(&user_id);
                                     match authenticated_for_microcontroller {
                                         Some(microcontroller_id) => {
                                             match state.microcontrollers.get_mut(microcontroller_id)
@@ -195,13 +196,9 @@ async fn handle_ws_inner(
         }
     }
 
-    if let Some(microcontroller_id) = authenticated_for_microcontroller {
-        state
-            .authentications
-            .write()
-            .await
-            .remove_value(microcontroller_id);
-    }
+    let mut authentications = state.authentications.write().await;
+    authentications.remove_value(&user_id);
+    drop(authentications);
 
     state.users.remove(&user_id);
 }
